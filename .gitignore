@@ -1,0 +1,5 @@
+virtual_env_rag02/
+__pycache__/
+*.pyc
+.env
+.DS_Store
