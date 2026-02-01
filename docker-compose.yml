@@ -1,6 +1,5 @@
-servives:
+services:
+  valkey:
     image: valkey/valkey
     ports:
-      - 6379:6379
-
-# added̀
+      - "6379:6379"
