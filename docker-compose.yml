@@ -1,4 +1,20 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    ports:
+      - "8000:8000"
+    depends_on:
+      - valkey
+    environment:
+      - REDIS_HOST=valkey
+      - REDIS_PORT=6379
+    command: python3 main.py
+    
   valkey:
     image: valkey/valkey
     ports:
