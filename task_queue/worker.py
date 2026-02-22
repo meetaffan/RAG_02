@@ -14,19 +14,28 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_qdrant import QdrantVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
+from qdrant_client import QdrantClient
 from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Initialize RAG components (same as RAG-01)
+# Configuration
 pdf_path = os.getenv('PDF_PATH', os.path.join(rag01_path, 'nodejs.pdf'))
+qdrant_host = os.getenv('QDRANT_HOST', 'localhost')
+qdrant_port = os.getenv('QDRANT_PORT', '6333')
+qdrant_url = f"http://{qdrant_host}:{qdrant_port}"
+
+# Global RAG components (initialized once at module load)
 embedding_model = None
 vector_store = None
 gemini_client = None
 
 def initialize_rag():
-    """Initialize RAG system using RAG-01's approach"""
+    """
+    Initialize RAG system using RAG-01's approach
+    Called once when module is imported (before worker forks)
+    """
     global embedding_model, vector_store, gemini_client
     
     # Vector Embeddings using HuggingFace
@@ -34,36 +43,46 @@ def initialize_rag():
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
     
-    # Load PDF
-    loader = PyPDFLoader(pdf_path)
-    docs = loader.load()
+    # Connect to existing vector store (don't reload PDF each time)
+    client = QdrantClient(url=qdrant_url)
     
-    # Chunk documents
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200
-    )
-    split_docs = text_splitter.split_documents(documents=docs)
+    # Check if collection exists
+    collections = client.get_collections().collections
+    collection_exists = any(c.name == "rag_01" for c in collections)
     
-    # Get Qdrant configuration
-    qdrant_host = os.getenv('QDRANT_HOST', 'localhost')
-    qdrant_port = os.getenv('QDRANT_PORT', '6333')
-    qdrant_url = f"http://{qdrant_host}:{qdrant_port}"
-    
-    # Create vector store
-    vector_store = QdrantVectorStore.from_documents(
-        documents=split_docs,
-        url=qdrant_url,
-        collection_name="rag_01",
-        embedding=embedding_model
-    )
+    if not collection_exists:
+        # First time: Load PDF and create collection
+        loader = PyPDFLoader(pdf_path)
+        docs = loader.load()
+        
+        # Chunk documents
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200
+        )
+        split_docs = text_splitter.split_documents(documents=docs)
+        
+        # Create vector store
+        vector_store = QdrantVectorStore.from_documents(
+            documents=split_docs,
+            url=qdrant_url,
+            collection_name="rag_01",
+            embedding=embedding_model
+        )
+        print(f"✓ RAG initialized: {len(split_docs)} chunks indexed from {pdf_path}")
+    else:
+        # Collection exists: just connect to it
+        vector_store = QdrantVectorStore(
+            client=client,
+            collection_name="rag_01",
+            embedding=embedding_model
+        )
+        print(f"✓ Connected to existing vector store: rag_01")
     
     # Initialize Gemini client
     gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-    
-    print(f"✓ RAG initialized: {len(split_docs)} chunks indexed from {pdf_path}")
 
-# Initialize on module load
+# Initialize on module load (before fork)
 try:
     initialize_rag()
 except Exception as e:
