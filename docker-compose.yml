@@ -19,7 +19,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - PDF_PATH=/workspace/nodejs.pdf
     command: python3 main.py
-    
+
   worker:
     build:
       context: .
@@ -37,16 +37,13 @@ services:
       - QDRANT_PORT=6333
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - PDF_PATH=/workspace/nodejs.pdf
-      - OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
-      - PYTORCH_ENABLE_MPS_FALLBACK=1
-      - TOKENIZERS_PARALLELISM=false
-    command: rq worker --url redis://valkey:6379 --with-scheduler --worker-class task_queue.custom_worker.NoForkWorker
-    
+    command: python3 run_worker.py
+
   valkey:
     image: valkey/valkey
     ports:
       - "6379:6379"
-      
+
   qdrant:
     image: qdrant/qdrant
     ports:

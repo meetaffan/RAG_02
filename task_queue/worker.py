@@ -13,7 +13,7 @@ sys.path.insert(0, rag01_path)
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_qdrant import QdrantVectorStore
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from qdrant_client import QdrantClient
 from google import genai
 from dotenv import load_dotenv
@@ -31,16 +31,17 @@ embedding_model = None
 vector_store = None
 gemini_client = None
 
-def initialize_rag():
+def initialize_rag(force: bool = False):
     """
-    Initialize RAG system using RAG-01's approach
-    Called once when module is imported (before worker forks)
+    Initialize RAG system using Gemini embeddings API
+    No local ML model = no fork issues with RQ workers
     """
     global embedding_model, vector_store, gemini_client
     
-    # Vector Embeddings using HuggingFace
-    embedding_model = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    # Vector Embeddings using Gemini API (replaces HuggingFace SentenceTransformer)
+    embedding_model = GoogleGenerativeAIEmbeddings(
+        model="gemini-embedding-001",
+        google_api_key=os.environ.get("GEMINI_API_KEY")
     )
     
     # Connect to existing vector store (don't reload PDF each time)
@@ -82,11 +83,9 @@ def initialize_rag():
     # Initialize Gemini client
     gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# Initialize on module load (before fork)
-try:
-    initialize_rag()
-except Exception as e:
-    print(f"✗ Error initializing RAG: {e}")
+# NOTE: initialize_rag() is called lazily on first query, not at module load.
+# This prevents the app container (which also imports this module) from
+# making unnecessary API calls to Gemini on startup.
 
 
 def process_query(query: str):
@@ -94,13 +93,16 @@ def process_query(query: str):
     Process a user query through the RAG system
     This function runs asynchronously in the RQ worker
     """
+    global embedding_model, vector_store, gemini_client
     print(f"Processing query: {query}")
-    
+
+    # Lazy initialization — only runs in the worker process on first query
     if not vector_store or not gemini_client:
-        return {
-            "error": "RAG system not initialized",
-            "query": query
-        }
+        try:
+            initialize_rag()
+        except Exception as e:
+            print(f"✗ Error initializing RAG: {e}")
+            return {"error": f"RAG init failed: {e}", "query": query}
     
     try:
         # Retrieve relevant documents (same as RAG-01)
